@@ -1,0 +1,21 @@
+{
+  "name": "qbt-filter",
+  "version": "1.0.0",
+  "main": "dist/qbt-filter.js",
+  "author": "ThinhHV <thinh@thinhhv.com>",
+  "license": "MIT",
+  "scripts": {
+    "dev": "vite-node --watch src/index.ts",
+    "dev:ts": "node --experimental-strip-types src/index.ts",
+    "start": "node dist/qbt-filter.js",
+    "build": "vite build"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@rollup/plugin-commonjs": "^28.0.2",
+    "@rollup/plugin-node-resolve": "^16.0.0",
+    "@types/node": "^22.10.5",
+    "vite": "^6.0.7",
+    "vite-node": "^2.1.8"
+  }
+}

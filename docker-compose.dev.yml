@@ -1,0 +1,30 @@
+services:
+  qbittorrent-filter:
+    container_name: qbittorrent-filter
+    image: qbittorrent-filter
+    restart: always
+    build: .
+    network_mode: host
+    init: true
+    # Using command or update in environment
+    # (the params in command will override environment variables)
+    # command: sh -c "node qbt-filter.js -u 127.0.0.1 -p 8080 -t 10 -c 1"
+    environment:
+      URL: ${URL:-127.0.0.1}
+      PORT: ${PORT:-8080}
+      USERNAME: ${USERNAME}
+      PASSWORD: ${PASSWORD}
+      SSL: ${SSL:-false}
+      TIME_INTERVAL: ${TIME_INTERVAL:-10}
+      TIME_CLEAR: ${TIME_CLEAR:-1}
+      CLEAR_IMMEDIATELY: ${CLEAR_IMMEDIATELY:-false}
+      WATCH: ${WATCH:-false}
+      BLOCK_CLIENTS: ${BLOCK_CLIENTS:-false}
+      BLOCK_LIST: ${BLOCK_LIST}
+      DELIMITER: ${DELIMITER:-,}
+      DRY: ${DRY:-false}
+      DEBUG: ${DEBUG:-false}
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
