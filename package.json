@@ -15,7 +15,7 @@
     "@rollup/plugin-commonjs": "^28.0.2",
     "@rollup/plugin-node-resolve": "^16.0.0",
     "@types/node": "^22.10.5",
-    "vite": "^6.0.7",
+    "vite": "^6.4.1",
     "vite-node": "^2.1.8"
   }
 }
