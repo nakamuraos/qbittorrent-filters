@@ -156,6 +156,8 @@ yarn dev
 yarn
 # Build
 yarn build
+# Output file at locate: dist/qbt-filter.js
+node dist/qbt-filter.js
 ```
 
 # Author
