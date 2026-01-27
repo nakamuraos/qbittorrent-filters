@@ -57,17 +57,43 @@ export class ProgressDetector {
 
   /**
    * Detect progress vs data mismatch
+   *
+   * NOTE: We can only see data downloaded from OUR client, not from all peers.
+   * Therefore, we validate if progress INCREASE can be explained by downloaded data from us.
+   * If they claim more progress than the data we gave them allows, that's suspicious.
    */
   private detectProgressMismatch(
     metrics: PeerMetrics,
     torrentSize: number,
   ): Violation | null {
-    const expectedDownloaded = torrentSize * metrics.currentProgress;
-    const actualDownloaded = metrics.totalDownloaded;
-    const mismatchBytes = Math.abs(expectedDownloaded - actualDownloaded);
+    // Need at least 2 history points to compare progress increase
+    if (metrics.progressHistory.length < 2) return null;
+
+    const firstSnapshot = metrics.progressHistory[0];
+    const currentSnapshot =
+      metrics.progressHistory[metrics.progressHistory.length - 1];
+
+    // Calculate progress increase since first seen
+    const progressIncrease = currentSnapshot.progress - firstSnapshot.progress;
+
+    // Calculate actual data downloaded from us
+    const dataFromUs = currentSnapshot.downloaded - firstSnapshot.downloaded;
+
+    // Calculate minimum data needed for this progress increase
+    const requiredDataForProgress = progressIncrease * torrentSize;
+
+    // They can't have gained more progress than the data we gave them allows
+    // (they might have less progress increase if they got data from other peers too)
+    const mismatchBytes = Math.max(0, requiredDataForProgress - dataFromUs);
     const mismatchPercent = (mismatchBytes / torrentSize) * 100;
 
-    if (mismatchPercent > this.config.maxProgressMismatchPercent) {
+    // Only flag if they claim significantly more progress than our data allows
+    // This catches peers that fake progress increases beyond what they actually downloaded
+    if (
+      mismatchPercent > this.config.maxProgressMismatchPercent &&
+      dataFromUs > 1024 * 1024
+    ) {
+      // At least 1MB downloaded
       const severity = this.getSeverity(mismatchPercent, [15, 30, 50]);
       const scoreImpact = this.getScoreImpact(severity);
 
@@ -75,12 +101,13 @@ export class ProgressDetector {
         type: "progress_mismatch" as ViolationType,
         timestamp: new Date(),
         severity,
-        description: `Progress mismatch: ${mismatchPercent.toFixed(1)}% difference between reported progress and actual data`,
+        description: `Progress increased ${mismatchPercent.toFixed(1)}% more than data downloaded from us allows`,
         details: {
-          expectedDownloaded: this.formatBytes(expectedDownloaded),
-          actualDownloaded: this.formatBytes(actualDownloaded),
+          progressIncrease: (progressIncrease * 100).toFixed(2) + "%",
+          dataFromUs: this.formatBytes(dataFromUs),
+          requiredDataForProgress: this.formatBytes(requiredDataForProgress),
           mismatchPercent: mismatchPercent.toFixed(2),
-          reportedProgress: (metrics.currentProgress * 100).toFixed(2) + "%",
+          currentProgress: (currentSnapshot.progress * 100).toFixed(2) + "%",
         },
         scoreImpact,
       };
