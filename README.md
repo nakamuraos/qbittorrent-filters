@@ -1,7 +1,18 @@
 # qBittorrent Filters
 
-- A small script for qBittorrent that blocks Xunlei, Thunder, XL0012,... clients automatically.
-- Default block list:
+A powerful script for qBittorrent that blocks problematic peers using both client name filtering and advanced behavioral analysis.
+
+## Features
+
+- **Client-Based Filtering**: Blocks known bad clients (Xunlei, Thunder, XL0012, etc.) automatically
+- **Smart Rate-Based Detection**: Advanced behavioral analysis to detect suspicious peers
+  - Progress tracking and validation
+  - Upload/download ratio monitoring
+  - Connection pattern analysis
+  - Automatic whitelisting of good peers
+  - [See detailed documentation](SMART_DETECTION.md)
+
+## Default Block List
 
   ```txt
   Thunder
@@ -54,12 +65,29 @@ The following options are supported:
 ```bash
 # Show help:
 yarn start -h
-# Default params:
+
+# Default params (client-based filtering only):
 yarn start
+
 # Custom params:
 yarn start -u 127.0.0.1 -p 8080 -t 10 -c 1
 yarn start -u 127.0.0.1 -p 8080 -U admin -P admin --dry --debug
+
+# With smart detection enabled:
+yarn start --enable-smart-detection
+yarn start --enable-smart-detection --smart-ban-score 75 --enable-auto-whitelist
+
+# Full example with smart detection:
+yarn start \
+  -u 127.0.0.1 -p 8080 \
+  --enable-smart-detection \
+  --smart-ban-score 70 \
+  --min-upload-ratio 0.15 \
+  --enable-auto-whitelist \
+  --debug
 ```
+
+For detailed smart detection configuration, see [SMART_DETECTION.md](SMART_DETECTION.md).
 
 - Example log:
 
@@ -85,7 +113,14 @@ yarn start -u 127.0.0.1 -p 8080 -U admin -P admin --dry --debug
   ],
   delimiter: ',',
   dry: false,
-  debug: false
+  debug: false,
+  'enable-smart-detection': false,
+  'smart-ban-score': '75',
+  'smart-warn-score': '50',
+  'min-upload-ratio': '0.1',
+  'grace-period-minutes': '10',
+  'enable-auto-whitelist': false,
+  'export-smart-data': false
 }
 [2025-01-08T19:43:03.849Z] No auth required. Ignored get cookie.
 [2025-01-08T19:43:03.850Z] Fetching banned IPs...

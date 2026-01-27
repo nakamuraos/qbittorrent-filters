@@ -6,6 +6,8 @@
  */
 
 import getopt, { type Config } from "./getopt.ts";
+import { SmartDetector } from "./modules/smart-detector.ts";
+import type { PeerInfo, TorrentInfo, SmartDetectionConfig } from "./types.ts";
 
 // =====================================
 // CONFIGURATION
@@ -89,6 +91,40 @@ export const options = getopt({
     description: "Print detail error logs",
     default: process.env.DEBUG === "true" || false,
   },
+  // Smart Detection Options
+  "enable-smart-detection": {
+    key: "sd",
+    description: "Enable smart rate-based peer detection",
+    default: process.env.ENABLE_SMART_DETECTION === "true" || false,
+  },
+  "smart-ban-score": {
+    description: "Suspicion score threshold for auto-ban",
+    default: process.env.SMART_BAN_SCORE || 75,
+    args: 1,
+  },
+  "smart-warn-score": {
+    description: "Suspicion score threshold for warnings",
+    default: process.env.SMART_WARN_SCORE || 50,
+    args: 1,
+  },
+  "min-upload-ratio": {
+    description: "Minimum upload ratio required",
+    default: process.env.MIN_UPLOAD_RATIO || 0.1,
+    args: 1,
+  },
+  "grace-period-minutes": {
+    description: "Grace period before enforcing upload requirements",
+    default: process.env.GRACE_PERIOD_MINUTES || 10,
+    args: 1,
+  },
+  "enable-auto-whitelist": {
+    description: "Automatically whitelist well-behaved peers",
+    default: process.env.ENABLE_AUTO_WHITELIST === "true" || false,
+  },
+  "export-smart-data": {
+    description: "Export smart detection data to file on exit",
+    default: process.env.EXPORT_SMART_DATA || false,
+  },
 });
 
 export const delay = async (ms: number) => {
@@ -112,6 +148,7 @@ export class Filter {
   private options: Config = {};
   private commonHeaders: Record<string, string> = {};
   private bannedIPs: string = "";
+  protected smartDetector: SmartDetector | null = null;
 
   constructor(options: Config) {
     this.options = options;
@@ -120,6 +157,21 @@ export class Filter {
         .split(options.delimiter as string)
         .map((e) => e.trim());
     }
+
+    // Initialize smart detector if enabled
+    if (options["enable-smart-detection"]) {
+      const smartConfig: Partial<SmartDetectionConfig> = {
+        enabled: true,
+        banScoreThreshold: +(options["smart-ban-score"] || 75),
+        warnScoreThreshold: +(options["smart-warn-score"] || 50),
+        minUploadRatio: +(options["min-upload-ratio"] || 0.1),
+        gracePeriodMinutes: +(options["grace-period-minutes"] || 10),
+        enableAutoWhitelist: !!options["enable-auto-whitelist"],
+      };
+      this.smartDetector = new SmartDetector(smartConfig);
+      this.logging("Smart detection enabled with config:", smartConfig);
+    }
+
     this.reset();
   }
 
@@ -275,42 +327,179 @@ export class Filter {
     }
     let totalPeers = 0;
     const peersToBanned: any[][] = [];
+    const smartBannedPeers: any[][] = [];
+
     for (const [hash, torrent] of activeTorrents) {
       const peers = await this.getPeers(hash);
       if (peers) {
-        Object.entries(peers.peers).forEach(async ([id, peer]: any[]) => {
+        Object.entries(peers.peers).forEach(([id, peer]: any[]) => {
           if (peer.client) {
             totalPeers++;
           }
-          if (
+
+          // 1. Original client-based filtering
+          const isBlockedClient =
             peer.client &&
             (this.options["block-list"] as any[]).findIndex(
               (regExp) =>
                 !!peer.client.match(new RegExp(regExp, "gmi")) ||
                 !!peer.peer_id_client.match(new RegExp(regExp, "gmi")),
-            ) > 0
-          ) {
-            peersToBanned.push([id, peer]);
+            ) > -1;
+
+          if (isBlockedClient) {
+            peersToBanned.push([id, { ...peer, banReason: "Blocked client" }]);
+            return;
+          }
+
+          // 2. Smart detection (if enabled)
+          if (this.smartDetector && peer.client) {
+            const peerInfo: PeerInfo = {
+              ip: peer.ip,
+              port: peer.port,
+              client: peer.client,
+              peer_id_client: peer.peer_id_client || "",
+              progress: peer.progress || 0,
+              downloaded: peer.downloaded || 0,
+              uploaded: peer.uploaded || 0,
+              dl_speed: peer.dl_speed || 0,
+              up_speed: peer.up_speed || 0,
+              connection: peer.connection || "",
+              country_code: peer.country_code || "",
+              country: peer.country || "",
+              flags: peer.flags || "",
+              relevance: peer.relevance || 0,
+            };
+
+            const torrentInfo: TorrentInfo = {
+              hash,
+              name: torrent.name || "Unknown",
+              size: torrent.size || 0,
+              progress: torrent.progress || 0,
+              num_seeds: torrent.num_seeds || 0,
+              num_leechs: torrent.num_leechs || 0,
+              state: torrent.state || "unknown",
+            };
+
+            const result = this.smartDetector.analyzePeer(
+              peerInfo,
+              torrentInfo,
+            );
+
+            if (result.shouldBan) {
+              smartBannedPeers.push([
+                id,
+                {
+                  ...peer,
+                  banReason: "Smart detection",
+                  violations: result.violations,
+                  suspicionScore: result.suspicionScore,
+                  behaviorScore: result.behaviorScore,
+                },
+              ]);
+            } else if (result.shouldWarn && this.options.debug) {
+              this.logging(
+                "WARNING:",
+                peer.ip,
+                peer.client,
+                `Score: ${result.suspicionScore}/${result.behaviorScore}`,
+                result.reason,
+              );
+            } else if (result.shouldWhitelist && this.options.debug) {
+              this.logging(
+                "AUTO-WHITELISTED:",
+                peer.ip,
+                peer.client,
+                result.reason,
+              );
+            }
           }
         });
       } else {
         this.logging(torrent.name, "Get list of peers failed");
       }
     }
+
     if (this.options.debug) {
       this.logging("Total", totalPeers, "peers filtered.");
+
+      // Show smart detection stats
+      if (this.smartDetector) {
+        const stats = this.smartDetector.getStats();
+        this.logging("Smart Detection Stats:", {
+          tracked: stats.totalPeersTracked,
+          active: stats.activePeers,
+          whitelisted: stats.whitelistedPeers,
+          flagged: stats.flaggedPeers,
+          toBan: stats.bannedPeers,
+          avgBehavior: stats.averageBehaviorScore,
+          avgSuspicion: stats.averageSuspicionScore,
+        });
+      }
     }
+
+    // Ban peers from original filter
     if (peersToBanned.length) {
       await this.banPeers(peersToBanned);
+      this.logging(`Banned ${peersToBanned.length} peers (client-based)`);
+    }
+
+    // Ban peers from smart detection
+    if (smartBannedPeers.length) {
+      await this.banPeersWithDetails(smartBannedPeers);
+      this.logging(`Banned ${smartBannedPeers.length} peers (smart detection)`);
+    }
+
+    // Update banned IPs
+    const allBannedPeers = [...peersToBanned, ...smartBannedPeers];
+    if (allBannedPeers.length) {
       await this.setConfigs({
         banned_IPs: [
           ...this.bannedIPs.split("\n").filter((e) => !!e),
-          ...peersToBanned
+          ...allBannedPeers
             .map(([, peer]) => peer.ip)
             .filter((e) => !this.bannedIPs.includes(e)),
         ].join("\n"),
       });
       await this.getBannedIPs();
+    }
+
+    // Periodic cleanup
+    if (this.smartDetector) {
+      const cleanup = this.smartDetector.cleanup();
+      if (cleanup.cleaned > 0 && this.options.debug) {
+        this.logging(`Cleaned up ${cleanup.cleaned} old peer records`);
+      }
+    }
+  }
+
+  // Ban peers with detailed violation logging
+  async banPeersWithDetails(peers: any[] = []) {
+    const log = () => {
+      peers.forEach(([id, peer]) => {
+        this.logging(
+          "BANNED (Smart):",
+          id,
+          peer.client,
+          `Behavior: ${peer.behaviorScore || 0}`,
+          `Suspicion: ${peer.suspicionScore || 0}`,
+        );
+        if (peer.violations && peer.violations.length > 0) {
+          peer.violations.forEach((v: any) => {
+            this.logging(`   └─ [${v.severity}] ${v.description}`);
+          });
+        }
+      });
+    };
+
+    const result =
+      this.options.dry ||
+      (await this.POST(
+        `${this.baseURL}/api/v2/transfer/banPeers`,
+        `peers=${peers.map(([id]) => id).join("|")}`,
+      ).then(() => true));
+
+    if (result) {
+      log();
     }
   }
 
@@ -428,10 +617,13 @@ export class Filter {
 // Global variables
 let interval: any = null;
 let lastClear = new Date();
+let globalFilter: Filter | null = null;
+
 // Main
 export const main = async () => {
   // Initialize
   const filter = new Filter(options as Config);
+  globalFilter = filter;
   filter.logging("Start filter with options\n", options);
 
   // Clear immediately banned peer list
@@ -464,8 +656,47 @@ main();
 // =====================================
 // EXIT
 // =====================================
-process.on("SIGINT", () => {
+process.on("SIGINT", async () => {
   clearInterval(interval);
+  console.log("\nShutting down...");
+
+  // Export smart detection data if enabled
+  if (
+    globalFilter &&
+    (globalFilter as any).smartDetector &&
+    options!["export-smart-data"]
+  ) {
+    try {
+      const fs = await import("fs");
+      const path = await import("path");
+
+      const detector = (globalFilter as any).smartDetector as SmartDetector;
+      const data = detector.exportData();
+      const stats = detector.getStats();
+
+      const exportPath =
+        typeof options!["export-smart-data"] === "string"
+          ? options!["export-smart-data"]
+          : "./smart-detection-data.json";
+
+      const fullData = {
+        exportedAt: new Date().toISOString(),
+        stats,
+        peers: JSON.parse(data),
+      };
+
+      fs.writeFileSync(exportPath, JSON.stringify(fullData, null, 2));
+      console.log(
+        `Smart detection data exported to: ${path.resolve(exportPath)}`,
+      );
+      console.log(
+        `Stats: ${stats.totalPeersTracked} tracked, ${stats.bannedPeers} banned, ${stats.whitelistedPeers} whitelisted`,
+      );
+    } catch (error) {
+      console.error("Failed to export smart detection data:", error);
+    }
+  }
+
   console.log("Exited.");
   process.exit();
 });
