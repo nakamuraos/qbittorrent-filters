@@ -91,11 +91,11 @@ export const options = getopt({
   },
 });
 
-export const delay = async (ms) => {
+export const delay = async (ms: number) => {
   await new Promise((resolve) => setTimeout(resolve, ms));
 };
 
-export const country2flag = (countryCode) => {
+export const country2flag = (countryCode: string) => {
   return countryCode
     .toUpperCase()
     .split("")
@@ -107,17 +107,17 @@ export const country2flag = (countryCode) => {
 // FILTER
 // =====================================
 export class Filter {
-  private cookie = undefined;
+  private cookie: string | undefined = undefined;
   private baseURL = "";
   private options: Config = {};
-  private commonHeaders = {};
-  private bannedIPs = "";
+  private commonHeaders: Record<string, string> = {};
+  private bannedIPs: string = "";
 
-  constructor(options) {
+  constructor(options: Config) {
     this.options = options;
     if (typeof options["block-list"] === "string") {
-      this.options["block-list"] = options["block-list"]
-        .split(options.delimiter)
+      this.options["block-list"] = (options["block-list"] as string)
+        .split(options.delimiter as string)
         .map((e) => e.trim());
     }
     this.reset();
@@ -157,11 +157,14 @@ export class Filter {
     // Get cookie from server
     const res = await this.POST(
       `${this.baseURL}/api/v2/auth/login`,
-      `username=${this.options.username}&password=${this.options.password}`
-    ).then((res) => res.headers.get("set-cookie"));
+      `username=${this.options.username}&password=${this.options.password}`,
+    ).then((res: Response | undefined) => res?.headers.get("set-cookie"));
     if (res) {
-      this.cookie = res.match(/(.*?);/)[1];
-      this.logging("Cookie:", this.cookie);
+      const match = res.match(/(.*?);/);
+      if (match) {
+        this.cookie = match[1];
+        this.logging("Cookie:", this.cookie);
+      }
     }
   }
 
@@ -179,7 +182,7 @@ export class Filter {
             .trim()
             .split("\n")
             .filter((e) => !!e).length,
-          "IPs banned."
+          "IPs banned.",
         );
         return this.bannedIPs;
       } else {
@@ -195,11 +198,11 @@ export class Filter {
   }
 
   // Update config
-  async setConfigs(configs) {
+  async setConfigs(configs: any) {
     if (!this.options.dry) {
       await this.POST(
         `${this.baseURL}/api/v2/app/setPreferences`,
-        `json=${JSON.stringify(configs)}`
+        `json=${JSON.stringify(configs)}`,
       );
     }
     return;
@@ -212,16 +215,16 @@ export class Filter {
       this.logging(
         "Total",
         Object.keys(allTorrents?.torrents || {}).length,
-        "torrents."
+        "torrents.",
       );
     }
     return (allTorrents?.torrents || {}) as any;
   }
 
   // Get peers of a torrent
-  async getPeers(torrentHash) {
+  async getPeers(torrentHash: string) {
     const peers = await this.GET(
-      `${this.baseURL}/api/v2/sync/torrentPeers?hash=${torrentHash}`
+      `${this.baseURL}/api/v2/sync/torrentPeers?hash=${torrentHash}`,
     );
     return peers;
   }
@@ -237,7 +240,7 @@ export class Filter {
           peer.client,
           peer.peer_id_client,
           country2flag(peer.country_code),
-          peer.country
+          peer.country,
         );
       });
     };
@@ -245,7 +248,7 @@ export class Filter {
       this.options.dry ||
       (await this.POST(
         `${this.baseURL}/api/v2/transfer/banPeers`,
-        `peers=${peers.map(([id]) => id).join("|")}`
+        `peers=${peers.map(([id]) => id).join("|")}`,
       ).then(() => true));
     if (result) {
       log();
@@ -265,7 +268,7 @@ export class Filter {
   async filter() {
     const torrents = await this.getAllTorrents();
     const activeTorrents: any[][] = Object.entries(torrents).filter(
-      ([, torrent]: any[]) => torrent.num_leechs > 0
+      ([, torrent]: any[]) => torrent.num_leechs > 0,
     );
     if (this.options.debug) {
       this.logging("Monitoring", activeTorrents.length, "active torrents.");
@@ -284,7 +287,7 @@ export class Filter {
             (this.options["block-list"] as any[]).findIndex(
               (regExp) =>
                 !!peer.client.match(new RegExp(regExp, "gmi")) ||
-                !!peer.peer_id_client.match(new RegExp(regExp, "gmi"))
+                !!peer.peer_id_client.match(new RegExp(regExp, "gmi")),
             ) > 0
           ) {
             peersToBanned.push([id, peer]);
@@ -311,7 +314,7 @@ export class Filter {
     }
   }
 
-  async GET(url: string, retry = 1) {
+  async GET(url: string, retry = 1): Promise<any> {
     return await fetch(url, {
       headers: {
         ...this.commonHeaders,
@@ -319,7 +322,7 @@ export class Filter {
         Cookie: this.cookie,
       },
     } as any)
-      .then(async (res) => {
+      .then(async (res): Promise<any> => {
         if (res.status === 403) {
           if (this.options.username && this.options.password) {
             // IP banned
@@ -327,7 +330,7 @@ export class Filter {
             if (body.includes("Your IP address has been banned")) {
               this.logging(body);
               this.logging(
-                "Please check username/password, restart qBittorrent and retry."
+                "Please check username/password, restart qBittorrent and retry.",
               );
               process.exit(1);
             }
@@ -338,13 +341,13 @@ export class Filter {
               return await this.GET(url, ++retry);
             } else {
               this.logging(
-                "The username or password are not correct. Exiting..."
+                "The username or password are not correct. Exiting...",
               );
               process.exit(1);
             }
           } else {
             this.logging(
-              "qBittorrent need auth but the username and password are not configured. Exiting..."
+              "qBittorrent need auth but the username and password are not configured. Exiting...",
             );
             process.exit(1);
           }
@@ -361,7 +364,11 @@ export class Filter {
       .catch(this.logging);
   }
 
-  async POST(url: string, data?: any, retry = 1) {
+  async POST(
+    url: string,
+    data?: any,
+    retry = 1,
+  ): Promise<Response | undefined> {
     return await fetch(url, {
       method: "POST",
       headers: {
@@ -371,7 +378,7 @@ export class Filter {
       },
       body: data,
     } as any)
-      .then(async (res) => {
+      .then(async (res): Promise<any> => {
         if (res.status === 403) {
           if (this.options.username && this.options.password) {
             // IP banned
@@ -379,7 +386,7 @@ export class Filter {
             if (body.includes("Your IP address has been banned")) {
               this.logging(body);
               this.logging(
-                "Please check username/password, restart qBittorrent and retry."
+                "Please check username/password, restart qBittorrent and retry.",
               );
               process.exit(1);
             }
@@ -390,13 +397,13 @@ export class Filter {
               return await this.POST(url, data, ++retry);
             } else {
               this.logging(
-                "The username or password are not correct. Exiting..."
+                "The username or password are not correct. Exiting...",
               );
               process.exit(1);
             }
           } else {
             this.logging(
-              "qBittorrent need auth but the username and password are not configured. Exiting..."
+              "qBittorrent need auth but the username and password are not configured. Exiting...",
             );
             process.exit(1);
           }
@@ -407,7 +414,7 @@ export class Filter {
   }
 
   // Logging
-  logging(...msg) {
+  logging(...msg: any[]) {
     if (msg[0] instanceof Error && !(this?.options || options).debug) {
       msg = ["[ERROR]", (msg[0].cause as any)?.message || msg[0].message];
     }
@@ -424,7 +431,7 @@ let lastClear = new Date();
 // Main
 export const main = async () => {
   // Initialize
-  const filter = new Filter(options);
+  const filter = new Filter(options as Config);
   filter.logging("Start filter with options\n", options);
 
   // Clear immediately banned peer list
