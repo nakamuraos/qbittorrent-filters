@@ -162,7 +162,12 @@ export class ProgressDetector {
   }
 
   /**
-   * Detect impossible download speed (progress increases faster than network allows)
+   * Detect physically impossible download speed (progress increases faster than any network allows)
+   *
+   * NOTE: We only compare against absolute physical network limits (e.g., 10 Gbps),
+   * NOT against our upload speed to this peer. Peers can download from multiple
+   * sources simultaneously, so their progress can legitimately increase much faster
+   * than what we upload to them.
    */
   private detectImpossibleSpeed(
     metrics: PeerMetrics,
@@ -181,34 +186,30 @@ export class ProgressDetector {
 
     const bytesForProgress = progressDiff * torrentSize;
     const requiredSpeed = bytesForProgress / timeDiff;
-    const actualSpeed = metrics.downloadSpeed;
 
-    // Skip if actual speed is too low (might be measurement issue)
-    if (actualSpeed < 1000) return null;
+    // Only flag if the required speed exceeds physically plausible limits (10 Gbps)
+    // This avoids false positives from peers downloading from multiple sources
+    const MAX_PLAUSIBLE_SPEED = 10 * 1024 * 1024 * 1024; // 10 Gbps in bytes/s
+    if (requiredSpeed <= MAX_PLAUSIBLE_SPEED) return null;
 
-    const speedRatio = requiredSpeed / actualSpeed;
+    const speedRatio = requiredSpeed / MAX_PLAUSIBLE_SPEED;
+    const severity = this.getSeverity(speedRatio, [2, 5, 10]);
+    const scoreImpact = this.getScoreImpact(severity);
 
-    if (speedRatio > this.config.impossibleSpeedMultiplier) {
-      const severity = this.getSeverity(speedRatio, [2, 5, 10]);
-      const scoreImpact = this.getScoreImpact(severity);
-
-      return {
-        type: "impossible_speed" as ViolationType,
-        timestamp: new Date(),
-        severity,
-        description: `Impossible progress: Progress increased ${speedRatio.toFixed(1)}x faster than download speed allows`,
-        details: {
-          requiredSpeed: this.formatSpeed(requiredSpeed),
-          actualSpeed: this.formatSpeed(actualSpeed),
-          speedRatio: speedRatio.toFixed(2),
-          progressChange: (progressDiff * 100).toFixed(2) + "%",
-          timePeriod: timeDiff.toFixed(1) + "s",
-        },
-        scoreImpact,
-      };
-    }
-
-    return null;
+    return {
+      type: "impossible_speed" as ViolationType,
+      timestamp: new Date(),
+      severity,
+      description: `Impossible progress: Progress increased at ${this.formatSpeed(requiredSpeed)}, exceeding physical network limits`,
+      details: {
+        requiredSpeed: this.formatSpeed(requiredSpeed),
+        maxPlausibleSpeed: this.formatSpeed(MAX_PLAUSIBLE_SPEED),
+        speedRatio: speedRatio.toFixed(2),
+        progressChange: (progressDiff * 100).toFixed(2) + "%",
+        timePeriod: timeDiff.toFixed(1) + "s",
+      },
+      scoreImpact,
+    };
   }
 
   /**

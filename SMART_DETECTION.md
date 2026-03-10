@@ -11,7 +11,7 @@ The Smart Rate-Based Detection system analyzes peer behavior patterns to identif
 ### 1. **Progress Tracking**
 - Detects progress vs. data mismatch (peer claims 50% but downloaded 90%)
 - Identifies stalled progress (stuck at same percentage while downloading)
-- Catches impossible speed (progress increases faster than network allows)
+- Catches impossible speed (progress increases faster than physically possible network limits)
 - Flags peers at 100% that are still downloading
 - Tracks zero-progress long-term leechers
 
@@ -175,8 +175,9 @@ Suspicious Peer:
    - Example: No progress change in 10+ minutes with download speed >1KB/s
 
 3. **Impossible Speed**
-   - Progress increases faster than download speed allows
-   - Example: Progress jumped 10% in 30 seconds but speed was only 100KB/s
+   - Progress increases at a speed exceeding physical network limits (>10 Gbps)
+   - Note: Peers download from multiple sources simultaneously, so their progress can legitimately increase much faster than our upload speed to them — only truly impossible speeds (beyond 10 Gbps) are flagged
+   - Example: Progress jumped in a way that would require >10 Gbps sustained throughput
 
 4. **Complete But Downloading**
    - Peer claims 100% but still downloading
