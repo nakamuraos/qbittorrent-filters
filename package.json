@@ -12,10 +12,8 @@
   },
   "dependencies": {},
   "devDependencies": {
-    "@rollup/plugin-commonjs": "^29.0.0",
-    "@rollup/plugin-node-resolve": "^16.0.3",
-    "@types/node": "^25.0.10",
-    "vite": "^7.3.1",
-    "vite-node": "^5.3.0"
+    "@types/node": "^26.6.3",
+    "vite": "^8.3.1",
+    "vite-node": "^6.0.0"
   }
 }
